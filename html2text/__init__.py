@@ -53,6 +53,7 @@ class HTML2Text(html.parser.HTMLParser):
         self.split_next_td = False
         self.td_count = 0
         self.table_start = False
+        self.table_label_start = False
         self.unicode_snob = config.UNICODE_SNOB  # covered in cli
         self.escape_snob = config.ESCAPE_SNOB  # covered in cli
         self.links_each_paragraph = config.LINKS_EACH_PARAGRAPH
@@ -366,18 +367,26 @@ class HTML2Text(html.parser.HTMLParser):
                     self.p()
                 else:
                     self.soft_br()
-            elif self.astack:
+            elif self.astack and tag == "div" :
                 pass
+            elif self.table_label_start and tag == "p" and  start:
+                pass
+            elif self.table_label_start and tag == "p" and not start:
+                self.o("</br>")
             else:
                 self.p()
 
         if tag == "br" and start:
-            if self.astack:
-                self.space = True
-            elif self.blockquote > 0:
-                self.o("  \n> ")
+            if start:
+                if self.blockquote > 0:
+                    self.o("  \n> ")
+                elif self.table_label_start:
+                    pass
+                else:
+                    self.o("  \n")
             else:
-                self.o("  \n")
+                if self.table_label_start:
+                    self.o("</br>")
 
         if tag == "hr" and start:
             self.p()
@@ -490,7 +499,12 @@ class HTML2Text(html.parser.HTMLParser):
             self.quote = not self.quote
 
         def link_url(self: HTML2Text, link: str, title: str = "") -> None:
-            url = urlparse.urljoin(self.baseurl, link)
+            url = link
+            try:
+                url = urlparse.urljoin(self.baseurl, link)
+            except ValueError:
+                # Ignore malformed URLs.
+                pass
             title = ' "{}"'.format(title) if title.strip() else ""
             self.o("]({url}{title})".format(url=escape_md(url), title=title))
 
@@ -585,9 +599,12 @@ class HTML2Text(html.parser.HTMLParser):
                     self.o("![" + escape_md(alt) + "]")
                     if self.inline_links:
                         href = attrs.get("href") or ""
-                        self.o(
-                            "(" + escape_md(urlparse.urljoin(self.baseurl, href)) + ")"
-                        )
+                        try:
+                            href = urlparse.urljoin(self.baseurl, href)
+                        except ValueError:
+                            # Ignore malformed URLs.
+                            pass
+                        self.o("(" + escape_md(href) + ")")
                     else:
                         i = self.previousIndex(attrs)
                         if i is not None:
@@ -683,17 +700,19 @@ class HTML2Text(html.parser.HTMLParser):
                 if tag == "table":
                     if start:
                         self.table_start = True
+                        self.table_label_start = True
                         if self.pad_tables:
                             self.o("<" + config.TABLE_MARKER_FOR_PAD + ">")
                             self.o("  \n")
                     else:
+                        self.table_label_start = False
                         if self.pad_tables:
                             # add break in case the table is empty or its 1 row table
                             self.soft_br()
                             self.o("</" + config.TABLE_MARKER_FOR_PAD + ">")
                             self.o("  \n")
                 if tag in ["td", "th"] and start:
-                    if self.split_next_td:
+                    if self.split_next_td or self.table_start:
                         self.o("| ")
                     self.split_next_td = True
 
@@ -821,12 +840,13 @@ class HTML2Text(html.parser.HTMLParser):
                 newa = []
                 for link in self.a:
                     if self.outcount > link.outcount:
-                        self.out(
-                            "   ["
-                            + str(link.count)
-                            + "]: "
-                            + urlparse.urljoin(self.baseurl, link.attrs["href"])
-                        )
+                        href = link.attrs["href"]
+                        try:
+                            href = urlparse.urljoin(self.baseurl, href)
+                        except ValueError:
+                            # Ignore malformed URLs, and also calm mypy.
+                            assert href is not None
+                        self.out("   [" + str(link.count) + "]: " + href)
                         if "title" in link.attrs:
                             assert link.attrs["title"] is not None
                             self.out(" (" + link.attrs["title"] + ")")
