@@ -657,7 +657,7 @@ class HTML2Text(html.parser.HTMLParser):
                 self.start = True
 
         if tag in ["table", "tr", "td", "th"]:
-            if self.ignore_tables:
+            if self.split_next_td or self.table_start:
                 if tag == "tr":
                     if start:
                         pass
